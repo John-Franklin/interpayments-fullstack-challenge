@@ -1,0 +1,255 @@
+diff --git a/bff/src/controllers/reports.controller.ts b/bff/src/controllers/reports.controller.ts
+new file mode 100644
+index 0000000..07e844d
+--- /dev/null
++++ b/bff/src/controllers/reports.controller.ts
+@@ -0,0 +1,28 @@
++import { Response, NextFunction } from 'express';
++import { AuthenticatedRequest } from '../types';
++import { fetchFromPaymentsApi } from '../services/paymentsApiProxy';
++import { ResponseCache } from '../services/responseCache';
++
++const SETTLEMENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
++
++// A day's settlement doesn't change once the day is over, and the report is expensive to build
++const settlementCache = new ResponseCache<unknown>(SETTLEMENT_CACHE_TTL_MS);
++
++export async function fetchSettlementReport(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
++  const cached = settlementCache.get(req.originalUrl);
++  if (cached) {
++    res.json(cached);
++    return;
++  }
++
++  try {
++    const date = encodeURIComponent(String(req.query.date ?? ''));
++    const { status, body } = await fetchFromPaymentsApi(req, `/reports/settlement?date=${date}`);
++    if (status === 200) {
++      settlementCache.set(req.originalUrl, body);
++    }
++    res.status(status).json(body);
++  } catch (err) {
++    next(err);
++  }
++}
+diff --git a/bff/src/routes/index.ts b/bff/src/routes/index.ts
+index 9c10ecd..f96129f 100644
+--- a/bff/src/routes/index.ts
++++ b/bff/src/routes/index.ts
+@@ -2,6 +2,7 @@ import { Router } from 'express';
+ import { requireApiKey } from '../middleware/requireApiKey';
+ import merchantsRoutes from './merchants.routes';
+ import paymentsRoutes from './payments.routes';
++import reportsRoutes from './reports.routes';
+ import surchargeRoutes from './surcharge.routes';
+ 
+ const router = Router();
+@@ -10,6 +11,7 @@ router.use(requireApiKey);
+ 
+ router.use('/merchants', merchantsRoutes);
+ router.use('/payments', paymentsRoutes);
++router.use('/reports', reportsRoutes);
+ router.use('/surcharge', surchargeRoutes);
+ 
+ export default router;
+diff --git a/bff/src/routes/reports.routes.ts b/bff/src/routes/reports.routes.ts
+new file mode 100644
+index 0000000..6d98e3c
+--- /dev/null
++++ b/bff/src/routes/reports.routes.ts
+@@ -0,0 +1,8 @@
++import { Router } from 'express';
++import * as controller from '../controllers/reports.controller';
++
++const router = Router();
++
++router.get('/settlement', controller.fetchSettlementReport);
++
++export default router;
+diff --git a/payments-api/src/InterPayments.Payments.Web.Api/Contracts/Reports.cs b/payments-api/src/InterPayments.Payments.Web.Api/Contracts/Reports.cs
+new file mode 100644
+index 0000000..dc2b566
+--- /dev/null
++++ b/payments-api/src/InterPayments.Payments.Web.Api/Contracts/Reports.cs
+@@ -0,0 +1,6 @@
++namespace InterPayments.Payments.Web.Api.Contracts;
++
++public sealed record SettlementReport(string Date, string Currency, int PaymentCount, double Gross, double SurchargeCollected, double Refunds, double Net,
++    IReadOnlyList<NetworkTotal> ByNetwork);
++
++public sealed record NetworkTotal(string Network, int Count, double Total);
+diff --git a/payments-api/src/InterPayments.Payments.Web.Api/Controllers/ReportsController.cs b/payments-api/src/InterPayments.Payments.Web.Api/Controllers/ReportsController.cs
+new file mode 100644
+index 0000000..3dd7730
+--- /dev/null
++++ b/payments-api/src/InterPayments.Payments.Web.Api/Controllers/ReportsController.cs
+@@ -0,0 +1,44 @@
++using InterPayments.Payments.Web.Api.Contracts;
++using InterPayments.Payments.Web.Api.Data;
++using InterPayments.Payments.Web.Api.Infrastructure.Extensions;
++using Microsoft.AspNetCore.Mvc;
++using Microsoft.EntityFrameworkCore;
++
++namespace InterPayments.Payments.Web.Api.Controllers;
++
++[ApiController]
++[Route("api/reports")]
++public sealed class ReportsController(PaymentsDbContext dbContext) : ControllerBase
++{
++    // Day totals so merchants can reconcile against the gateway's settlement file
++    [HttpGet("settlement")]
++    [ProducesResponseType(typeof(SettlementReport), StatusCodes.Status200OK)]
++    [ProducesResponseType(StatusCodes.Status400BadRequest)]
++    public async Task<ActionResult<SettlementReport>> Settlement(string date)
++    {
++        if (!DateTime.TryParse(date, out var day))
++            return BadRequest();
++
++        var merchant = HttpContext.GetMerchant();
++        var payments = await dbContext.Payments.AsNoTracking().ToListAsync();
++
++        var settled = payments
++                      .Where(x => x.MerchantId == merchant.Id)
++                      .Where(x => x.Status != PaymentStatus.Declined)
++                      .Where(x => x.CreatedAtUtc.ToLocalTime().Date == day.Date)
++                      .ToList();
++
++        var byNetwork = payments
++                        .Where(x => x.Status != PaymentStatus.Declined && x.CreatedAtUtc.ToLocalTime().Date == day.Date)
++                        .GroupBy(x => x.CardNetwork)
++                        .Select(x => new NetworkTotal(x.Key, x.Count(), Math.Round(x.Sum(y => y.Total), 2)))
++                        .OrderByDescending(x => x.Total)
++                        .ToList();
++
++        var gross = settled.Sum(x => x.Total);
++        var refunds = settled.Sum(x => x.RefundedAmount);
++
++        return new SettlementReport(day.ToString("yyyy-MM-dd"), merchant.Currency, settled.Count, Math.Round(gross, 2),
++            Math.Round(settled.Sum(x => x.Surcharge), 2), Math.Round(refunds, 2), Math.Round(gross - refunds, 2), byNetwork);
++    }
++}
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index be172dd..bdc254e 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -6,6 +6,7 @@ import { useMerchant } from './merchants/MerchantContext'
+ import { NewPaymentPage } from './pages/NewPaymentPage'
+ import { PaymentDetailPage } from './pages/PaymentDetailPage'
+ import { PaymentsPage } from './pages/PaymentsPage'
++import { SettlementPage } from './pages/SettlementPage'
+ 
+ const App = () => {
+   const navigate = useNavigate()
+@@ -21,6 +22,7 @@ const App = () => {
+       <nav className='app-nav'>
+         <Link to='/' className='brand'>Virtual Terminal</Link>
+         <div className='app-nav-actions'>
++          <Button onClick={() => navigate('/reports/settlement')}>Settlement</Button>
+           <Select
+             aria-label='Merchant'
+             value={devMerchant.id}
+@@ -38,6 +40,7 @@ const App = () => {
+         <Route path='/' element={<PaymentsPage />} />
+         <Route path='/payments/new' element={<NewPaymentPage />} />
+         <Route path='/payments/:id' element={<PaymentDetailPage />} />
++        <Route path='/reports/settlement' element={<SettlementPage />} />
+       </Routes>
+     </div>
+   )
+diff --git a/web/src/api/reports.ts b/web/src/api/reports.ts
+new file mode 100644
+index 0000000..4dd5862
+--- /dev/null
++++ b/web/src/api/reports.ts
+@@ -0,0 +1,20 @@
++import { request } from './client'
++
++export type NetworkTotal = {
++  network: string
++  count: number
++  total: number
++}
++
++export type SettlementReport = {
++  date: string
++  currency: string
++  paymentCount: number
++  gross: number
++  surchargeCollected: number
++  refunds: number
++  net: number
++  byNetwork: NetworkTotal[]
++}
++
++export const getSettlementReport = (date: string) => request<SettlementReport>(`/reports/settlement?date=${date}`)
+diff --git a/web/src/pages/SettlementPage.tsx b/web/src/pages/SettlementPage.tsx
+new file mode 100644
+index 0000000..16a60fb
+--- /dev/null
++++ b/web/src/pages/SettlementPage.tsx
+@@ -0,0 +1,65 @@
++import { useEffect, useState } from 'react'
++import { Alert, Card, Col, DatePicker, Row, Statistic, Table } from 'antd'
++import dayjs from 'dayjs'
++import { errorMessage } from '../api/client'
++import { getSettlementReport, SettlementReport } from '../api/reports'
++import { describeCard } from '../components/CardLabel'
++import { formatMoney } from '../utils/money'
++
++export const SettlementPage = () => {
++  const [ date, setDate ] = useState(new Date().toISOString().slice(0, 10))
++  const [ report, setReport ] = useState<SettlementReport>()
++  const [ error, setError ] = useState<string>()
++
++  useEffect(() => {
++    getSettlementReport(date)
++      .then(setReport)
++      .catch(e => setError(errorMessage(e)))
++  }, [date])
++
++  const money = (value: number) => formatMoney(value, report?.currency ?? 'USD')
++
++  return <>
++    <header className='page-header'>
++      <h1>Settlement</h1>
++      <DatePicker
++        aria-label='Settlement date'
++        value={dayjs(date)}
++        allowClear={false}
++        onChange={value => setDate(value.toISOString().slice(0, 10))}
++      />
++    </header>
++
++    {error && <Alert type='error' showIcon message="Couldn't load the report" description={error} style={{ marginBottom: 16 }} />}
++
++    {report && <>
++      <Row gutter={16} style={{ marginBottom: 16 }}>
++        <Col xs={12} md={6}>
++          <Card><Statistic title={`Gross (${report.paymentCount} payments)`} value={money(report.gross)} /></Card>
++        </Col>
++        <Col xs={12} md={6}>
++          <Card><Statistic title='Surcharge collected' value={money(report.surchargeCollected)} /></Card>
++        </Col>
++        <Col xs={12} md={6}>
++          <Card><Statistic title='Refunds' value={money(report.refunds)} /></Card>
++        </Col>
++        <Col xs={12} md={6}>
++          <Card><Statistic title='Net' value={money(report.net)} /></Card>
++        </Col>
++      </Row>
++
++      <Card title='By card network'>
++        <Table
++          rowKey='network'
++          dataSource={report.byNetwork}
++          pagination={false}
++          columns={[
++            { title: 'Network', dataIndex: 'network', render: (network: string) => describeCard(network, '') },
++            { title: 'Payments', dataIndex: 'count', align: 'right' },
++            { title: 'Total', dataIndex: 'total', align: 'right', render: (total: number) => money(total) },
++          ]}
++        />
++      </Card>
++    </>}
++  </>
++}

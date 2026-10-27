@@ -1,0 +1,48 @@
+# Runs the whole system: http://localhost:5173
+#
+# To work on one service locally while the others run here, see README.md.
+
+services:
+  surcharge-service:
+    build: ./surcharge-service
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
+
+  payments-api:
+    build: ./payments-api
+    environment:
+      SurchargeService__BaseUrl: ${SURCHARGE_SERVICE_URL:-http://surcharge-service:9000/}
+    ports:
+      - "5080:5080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - surcharge-service
+    restart: unless-stopped
+
+  bff:
+    build: ./bff
+    environment:
+      PAYMENTS_API_URL: ${PAYMENTS_API_URL:-http://payments-api:5080}
+      SURCHARGE_SERVICE_URL: ${SURCHARGE_SERVICE_URL:-http://surcharge-service:9000/}
+    ports:
+      - "3001:3001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - payments-api
+      - surcharge-service
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    environment:
+      BFF_URL: ${BFF_URL:-http://bff:3001}
+    ports:
+      - "5173:5173"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - bff
+    restart: unless-stopped

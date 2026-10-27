@@ -1,0 +1,30 @@
+[
+  {
+    "merchantId": "mer_001",
+    "name": "Blue Ridge Outfitters",
+    "currency": "USD",
+    "surchargeRate": 3.0,
+    "surchargeEnabled": true
+  },
+  {
+    "merchantId": "mer_002",
+    "name": "Harbor Dental Group",
+    "currency": "USD",
+    "surchargeRate": 2.5,
+    "surchargeEnabled": true
+  },
+  {
+    "merchantId": "mer_003",
+    "name": "Sakura Imports",
+    "currency": "JPY",
+    "surchargeRate": 3.0,
+    "surchargeEnabled": true
+  },
+  {
+    "merchantId": "mer_004",
+    "name": "Lakeside Community Theatre",
+    "currency": "USD",
+    "surchargeRate": 0.0,
+    "surchargeEnabled": false
+  }
+]

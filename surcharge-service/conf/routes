@@ -1,0 +1,7 @@
+# Routes
+# ~~~~
+
+GET     /health                 controllers.HealthController.health()
+
+POST    /v1/quotes              controllers.QuoteController.create()
+GET     /v1/bins/:bin           controllers.BinController.show(bin: String)
