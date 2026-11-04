@@ -9,8 +9,9 @@ const formatter = (currency: string) => {
 
 export const formatMoney = (amount: number, currency: string) => formatter(currency).format(amount)
 
+// decimal places in the currency's smallest unit: 2 for USD (cents), 0 for JPY (whole yen)
+export const minorUnitDigits = (currency: string) => formatter(currency).resolvedOptions().maximumFractionDigits ?? 2
+
 // gateway amounts come back in minor units (cents)
-export const formatMinorUnits = (minor: number, currency: string) => {
-  const digits = formatter(currency).resolvedOptions().maximumFractionDigits ?? 2
-  return formatMoney(minor / 10 ** digits, currency)
-}
+export const formatMinorUnits = (minor: number, currency: string) =>
+  formatMoney(minor / 10 ** minorUnitDigits(currency), currency)

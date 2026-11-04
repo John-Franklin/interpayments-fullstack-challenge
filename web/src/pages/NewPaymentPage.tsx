@@ -6,7 +6,7 @@ import { createPayment, quoteSurcharge } from '../api/payments'
 import { describeCard } from '../components/CardLabel'
 import { useMerchant } from '../merchants/MerchantContext'
 import { binOf, digitsOnly, formatCardNumber, isValidCardNumber, parseExpiry } from '../utils/card'
-import { formatMoney } from '../utils/money'
+import { formatMoney, minorUnitDigits } from '../utils/money'
 import { CardQuote, noSurchargeQuote, summarizeSurcharge } from '../utils/surcharge'
 
 type PaymentForm_Shape = {
@@ -27,6 +27,8 @@ export const NewPaymentPage = () => {
   const [ card, setCard ] = useState<CardQuote>()
   const [ quoteFailed, setQuoteFailed ] = useState(false)
 
+  // amounts are in the currency's smallest unit, so whole yen for JPY (docs/surcharging.md rule 3)
+  const digits = minorUnitDigits(merchant.currency)
   const amount = Form.useWatch('amount', form) ?? 0
   const bin = binOf(Form.useWatch('cardNumber', form) ?? '')
 
@@ -95,7 +97,7 @@ export const NewPaymentPage = () => {
 
           <Form form={form} layout='vertical' requiredMark='optional' onFinish={onFinish} disabled={submitting}>
             <Form.Item label={`Amount (${merchant.currency})`} name='amount' rules={[{ required: true, message: 'Enter an amount' }]}>
-              <InputNumber min={0.01} precision={2} style={{ width: '100%' }} placeholder='0.00' />
+              <InputNumber min={10 ** -digits} precision={digits} style={{ width: '100%' }} placeholder={(0).toFixed(digits)} />
             </Form.Item>
 
             <Form.Item
