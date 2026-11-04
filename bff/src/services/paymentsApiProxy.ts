@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { config } from '../config';
-import { AuthenticatedRequest } from '../types';
+import { AuthenticatedRequest, UpstreamError } from '../types';
+import { upstreamFetch, UpstreamResponse } from './upstream';
 
 function forwardedHeaders(req: AuthenticatedRequest): Record<string, string> {
   return {
@@ -9,21 +10,19 @@ function forwardedHeaders(req: AuthenticatedRequest): Record<string, string> {
   };
 }
 
-// For callers that need the body rather than piping it to res. path is relative to /api
+// For callers that need the body rather than piping it to res. path is relative to /api. Throws an UpstreamError
+// if the payments API is unreachable, too slow or doesn't answer with JSON
 export async function fetchFromPaymentsApi(
   req: AuthenticatedRequest,
   path: string,
   method = 'GET',
   body?: unknown,
-): Promise<{ status: number; body: any }> {
-  const response = await fetch(new URL(`/api${path}`, config.paymentsApiUrl), {
+): Promise<UpstreamResponse> {
+  return upstreamFetch('Payments API', new URL(`/api${path}`, config.paymentsApiUrl), {
     method,
     headers: forwardedHeaders(req),
     body: body === undefined ? undefined : JSON.stringify(body),
-  });
-
-  const text = await response.text();
-  return { status: response.status, body: text ? JSON.parse(text) : undefined };
+  }, config.paymentsApiTimeoutMs);
 }
 
 export async function proxyGet(req: AuthenticatedRequest, res: Response, path: string): Promise<void> {
@@ -43,7 +42,11 @@ async function proxyRequest(req: AuthenticatedRequest, res: Response, method: st
       res.status(status).json(body);
     }
   } catch (err) {
-    console.error(`Payments API request failed: method=${method} path=${path} error=${err}`);
-    res.status(502).json({ error: 'Payments API unavailable' });
+    if (!(err instanceof UpstreamError)) throw err;
+    // a timed out charge or refund may still have gone through, so retrying blindly could do it twice
+    const error = err.status === 504 && method === 'POST'
+      ? "The payments API didn't respond in time. Check the payments list before trying again."
+      : err.message;
+    res.status(err.status).json({ error });
   }
 }

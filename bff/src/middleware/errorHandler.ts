@@ -1,7 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { UpstreamError } from '../types';
 
-export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
+export function errorHandler(err: Error, req: Request, res: Response, next: NextFunction): void {
+  // too late to send an error response, so let Express close the connection
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+
   if (err instanceof UpstreamError) {
     res.status(err.status).json({ error: err.message });
     return;
@@ -14,6 +20,6 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
     return;
   }
 
-  console.error('Unhandled error:', err.message);
+  console.error(`Unhandled error: ${req.method} ${req.originalUrl}`, err);
   res.status(500).json({ error: 'Internal server error' });
 }
