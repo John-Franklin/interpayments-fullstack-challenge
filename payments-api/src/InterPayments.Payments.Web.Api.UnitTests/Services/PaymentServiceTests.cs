@@ -98,6 +98,26 @@ internal sealed class PaymentServiceTests
         }
     }
 
+    // Totals that aren't exact in binary floating point (79.99 * 100 == 7998.999...) used to be truncated,
+    // so the gateway captured a cent less than the receipt showed (docs/surcharging.md rule 4)
+    [TestCase(79.99, 0.00, 79.99, 7999)]
+    [TestCase(621.81, 18.65, 640.46, 64046)]
+    [TestCase(621.81, 18.65, 640.4599999999999, 64046)] // amount + surcharge summed as doubles by the surcharge service
+    [TestCase(128.45, 3.85, 132.29999999999998, 13230)]
+    [TestCase(0.29, 0.01, 0.3, 30)]
+    public async Task CreatePayment_ChargesTheGatewayExactlyTheReceiptTotal(double amount, double surcharge, double total, long expectedMinor)
+    {
+        var sut = CreatePaymentService(new SurchargeQuote("VISA", "CREDIT", true, 3.0, amount, surcharge, total));
+
+        var payment = await sut.CreatePayment(BlueRidge, CreateRequest("4111 1111 1111 1111", amount));
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(payment.GatewayAmountMinor, Is.EqualTo(expectedMinor));
+            Assert.That(_gateway.Ledger.Single().CapturedMinor, Is.EqualTo(expectedMinor));
+        }
+    }
+
     [Test]
     public async Task CreatePayment_WhenCardIsDeclined_StoresADeclinedPayment()
     {
