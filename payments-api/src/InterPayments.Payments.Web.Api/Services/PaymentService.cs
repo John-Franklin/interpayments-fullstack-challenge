@@ -14,7 +14,7 @@ public sealed class PaymentService(
         var quote = await surchargeClient.GetQuote(merchant.Id, request.Amount, cardNumber[..8], cancellationToken);
 
         var charge = await paymentGateway.Charge(new ChargeRequest(
-            AmountMinor: (long)(quote.Total * 100),
+            AmountMinor: ToMinorUnits(quote.Total),
             Currency: merchant.Currency,
             CardNumber: cardNumber,
             ExpiryMonth: request.ExpiryMonth,
@@ -49,6 +49,12 @@ public sealed class PaymentService(
 
         return payment;
     }
+
+    // Totals arrive as doubles, so 79.99 is really 79.98999... and casting total * 100 to long truncated it to 7998,
+    // charging a cent less than the receipt. Converting to decimal first recovers the shortest representation (79.99),
+    // and rounding (rather than truncating) to the minor unit makes the gateway charge exactly what the customer was shown
+    internal static long ToMinorUnits(double amount) =>
+        (long)Math.Round((decimal)amount * 100m, MidpointRounding.AwayFromZero);
 
     public Task<Payment?> GetPayment(string paymentId, CancellationToken cancellationToken = default) =>
         dbContext.Payments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == paymentId, cancellationToken);
