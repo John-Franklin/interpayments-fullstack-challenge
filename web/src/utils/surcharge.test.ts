@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SurchargeQuote } from '../api/payments'
-import { CardQuote, summarizeSurcharge } from './surcharge'
+import { CardQuote, noSurchargeQuote, summarizeSurcharge } from './surcharge'
 
 const VISA_CREDIT = '41111111'
 const VISA_DEBIT = '40000566'
@@ -48,5 +48,13 @@ describe('summarizeSurcharge', () => {
   it('shows nothing while the quote is for a different card', () => {
     expect(summarizeSurcharge(185, VISA_DEBIT, visaCredit)).toEqual({ status: 'pending' })
     expect(summarizeSurcharge(185, null, visaCredit)).toEqual({ status: 'pending' })
+  })
+
+  // rule 2: if the lookup fails, don't surcharge. The payments API charges the plain amount then too
+  it('shows the plain amount when the surcharge service is unavailable', () => {
+    const fallback = { bin: VISA_CREDIT, quote: noSurchargeQuote(185) }
+    expect(summarizeSurcharge(185, VISA_CREDIT, fallback)).toEqual({
+      status: 'quoted', surchargeable: false, rate: 0, surcharge: 0, total: 185,
+    })
   })
 })

@@ -7,7 +7,7 @@ import { describeCard } from '../components/CardLabel'
 import { useMerchant } from '../merchants/MerchantContext'
 import { binOf, digitsOnly, formatCardNumber, isValidCardNumber, parseExpiry } from '../utils/card'
 import { formatMoney } from '../utils/money'
-import { CardQuote, summarizeSurcharge } from '../utils/surcharge'
+import { CardQuote, noSurchargeQuote, summarizeSurcharge } from '../utils/surcharge'
 
 type PaymentForm_Shape = {
   amount: number
@@ -42,14 +42,14 @@ export const NewPaymentPage = () => {
     const timer = setTimeout(() => {
       quoteSurcharge(amount, bin)
         .then(quote => { if (active) setCard({ bin, quote }) })
-        .catch(() => { if (active) { setCard(undefined); setQuoteFailed(true) } })
+        .catch(() => { if (active) { setCard({ bin, quote: noSurchargeQuote(amount) }); setQuoteFailed(true) } })
     }, 250)
     return () => { active = false; clearTimeout(timer) }
   }, [amount, bin])
 
   const summary = summarizeSurcharge(amount, bin, card)
   // only for the card currently entered, never a previous one
-  const cardQuote = card?.bin === bin ? card.quote : undefined
+  const cardQuote = card?.bin === bin && !quoteFailed ? card.quote : undefined
 
   const onFinish = async (values: PaymentForm_Shape) => {
     // rule 4: the customer has to have seen the exact total before we charge
@@ -90,8 +90,8 @@ export const NewPaymentPage = () => {
       <Col xs={24} md={14}>
         <Card>
           {error && <Alert type='error' showIcon message='Payment failed' description={error} style={{ marginBottom: 16 }} />}
-          {quoteFailed && <Alert type='warning' showIcon message="Couldn't work out the surcharge for this card"
-            description='Check the card number and amount, or try again in a moment.' style={{ marginBottom: 16 }} />}
+          {quoteFailed && <Alert type='info' showIcon message="Surcharging is unavailable right now"
+            description="This payment will be taken without a surcharge." style={{ marginBottom: 16 }} />}
 
           <Form form={form} layout='vertical' requiredMark='optional' onFinish={onFinish} disabled={submitting}>
             <Form.Item label={`Amount (${merchant.currency})`} name='amount' rules={[{ required: true, message: 'Enter an amount' }]}>

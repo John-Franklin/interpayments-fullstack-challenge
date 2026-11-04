@@ -61,5 +61,6 @@ export const createPayment = (payment: NewPayment) =>
 export const refundPayment = (id: string) =>
   request<Payment>(`/payments/${encodeURIComponent(id)}/refund`, { method: 'POST' })
 
+// a short timeout: if the service is slow the terminal falls back to no surcharge rather than blocking the clerk
 export const quoteSurcharge = (amount: number, bin: string) =>
-  request<SurchargeQuote>('/surcharge/quote', { method: 'POST', body: { amount, bin } })
+  request<SurchargeQuote>('/surcharge/quote', { method: 'POST', body: { amount, bin }, timeoutMs: 2000, retries: 1 })
