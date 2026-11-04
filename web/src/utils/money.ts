@@ -14,5 +14,3 @@ export const formatMinorUnits = (minor: number, currency: string) => {
   const digits = formatter(currency).resolvedOptions().maximumFractionDigits ?? 2
   return formatMoney(minor / 10 ** digits, currency)
 }
-
-export const previewSurcharge = (amount: number, rate: number) => Math.round(amount * rate) / 100

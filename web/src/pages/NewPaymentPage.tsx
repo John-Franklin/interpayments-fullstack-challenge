@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react'
 import { Alert, App, Button, Card, Col, Form, Input, InputNumber, Row } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { errorMessage } from '../api/client'
-import { createPayment, quoteSurcharge, SurchargeQuote } from '../api/payments'
+import { createPayment, quoteSurcharge } from '../api/payments'
 import { describeCard } from '../components/CardLabel'
 import { useMerchant } from '../merchants/MerchantContext'
 import { binOf, digitsOnly, formatCardNumber, isValidCardNumber, parseExpiry } from '../utils/card'
-import { formatMoney, previewSurcharge } from '../utils/money'
+import { formatMoney } from '../utils/money'
+import { CardQuote, summarizeSurcharge } from '../utils/surcharge'
 
 type PaymentForm_Shape = {
   amount: number
@@ -23,28 +24,36 @@ export const NewPaymentPage = () => {
   const [form] = Form.useForm<PaymentForm_Shape>()
   const [ submitting, setSubmitting ] = useState(false)
   const [ error, setError ] = useState<string>()
-  const [ card, setCard ] = useState<SurchargeQuote>()
+  const [ card, setCard ] = useState<CardQuote>()
+  const [ quoteFailed, setQuoteFailed ] = useState(false)
 
   const amount = Form.useWatch('amount', form) ?? 0
   const bin = binOf(Form.useWatch('cardNumber', form) ?? '')
 
-  // only used for the card label under the input, the amount is a placeholder
+  // the quote drives both the card label and the surcharge shown to the customer. Debounced so we
+  // don't quote on every keystroke of the amount
   useEffect(() => {
-    if (!bin) {
+    setQuoteFailed(false)
+    if (!bin || !(amount > 0)) {
       setCard(undefined)
       return
     }
     let active = true
-    quoteSurcharge(1, bin)
-      .then(q => { if (active) setCard(q) })
-      .catch(() => { if (active) setCard(undefined) })
-    return () => { active = false }
-  }, [bin])
+    const timer = setTimeout(() => {
+      quoteSurcharge(amount, bin)
+        .then(quote => { if (active) setCard({ bin, quote }) })
+        .catch(() => { if (active) { setCard(undefined); setQuoteFailed(true) } })
+    }, 250)
+    return () => { active = false; clearTimeout(timer) }
+  }, [amount, bin])
 
-  const surcharge = amount > 0 ? previewSurcharge(amount, merchant.surchargeRate) : 0
-  const total = amount + surcharge
+  const summary = summarizeSurcharge(amount, bin, card)
+  // only for the card currently entered, never a previous one
+  const cardQuote = card?.bin === bin ? card.quote : undefined
 
   const onFinish = async (values: PaymentForm_Shape) => {
+    // rule 4: the customer has to have seen the exact total before we charge
+    if (summary.status !== 'quoted') return
     const expiry = parseExpiry(values.expiry)!
     setSubmitting(true)
     setError(undefined)
@@ -81,6 +90,8 @@ export const NewPaymentPage = () => {
       <Col xs={24} md={14}>
         <Card>
           {error && <Alert type='error' showIcon message='Payment failed' description={error} style={{ marginBottom: 16 }} />}
+          {quoteFailed && <Alert type='warning' showIcon message="Couldn't work out the surcharge for this card"
+            description='Check the card number and amount, or try again in a moment.' style={{ marginBottom: 16 }} />}
 
           <Form form={form} layout='vertical' requiredMark='optional' onFinish={onFinish} disabled={submitting}>
             <Form.Item label={`Amount (${merchant.currency})`} name='amount' rules={[{ required: true, message: 'Enter an amount' }]}>
@@ -91,7 +102,7 @@ export const NewPaymentPage = () => {
               label='Card number'
               name='cardNumber'
               normalize={formatCardNumber}
-              extra={card && describeCard(card.network, card.cardType)}
+              extra={cardQuote && describeCard(cardQuote.network, cardQuote.cardType)}
               rules={[
                 { required: true, message: 'Enter the card number' },
                 {
@@ -139,8 +150,8 @@ export const NewPaymentPage = () => {
               <Input autoComplete='cc-name' maxLength={100} />
             </Form.Item>
 
-            <Button type='primary' htmlType='submit' size='large' block loading={submitting}>
-              Charge {formatMoney(total, merchant.currency)}
+            <Button type='primary' htmlType='submit' size='large' block loading={submitting} disabled={summary.status !== 'quoted'}>
+              {summary.status === 'quoted' ? `Charge ${formatMoney(summary.total, merchant.currency)}` : 'Charge'}
             </Button>
           </Form>
         </Card>
@@ -151,10 +162,10 @@ export const NewPaymentPage = () => {
           <dl className='summary'>
             <dt>Amount</dt>
             <dd>{formatMoney(amount, merchant.currency)}</dd>
-            <dt>Card surcharge ({merchant.surchargeRate}%)</dt>
-            <dd>{formatMoney(surcharge, merchant.currency)}</dd>
+            <dt>Card surcharge{summary.status === 'quoted' && summary.surchargeable && ` (${summary.rate}%)`}</dt>
+            <dd>{summary.status === 'quoted' ? formatMoney(summary.surcharge, merchant.currency) : '—'}</dd>
             <dt className='summary-total'>Total</dt>
-            <dd className='summary-total'>{formatMoney(total, merchant.currency)}</dd>
+            <dd className='summary-total'>{summary.status === 'quoted' ? formatMoney(summary.total, merchant.currency) : '—'}</dd>
           </dl>
         </Card>
       </Col>
