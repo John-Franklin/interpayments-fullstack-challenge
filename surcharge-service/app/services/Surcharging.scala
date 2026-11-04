@@ -6,8 +6,9 @@ import scala.math.BigDecimal.RoundingMode
 
 object SurchargeRules {
 
-  // the card networks don't allow surcharging debit cards (docs/surcharging.md)
-  def isSurchargeable(card: CardInfo): Boolean = card.cardType != CardType.Debit
+  // credit cards only (docs/surcharging.md rules 1 and 2). An allow-list, so debit, prepaid, an unknown
+  // card type or any type added later is never surcharged
+  def isSurchargeable(card: CardInfo): Boolean = card.cardType == CardType.Credit
 }
 
 object SurchargeCalculator {

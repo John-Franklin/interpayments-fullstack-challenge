@@ -38,6 +38,31 @@ class QuoteControllerSpec extends PlaySpec
       (json \ "total").as[Double] mustBe 100.00
     }
 
+    "not surcharge a prepaid card" in {
+      val result = quote(Json.obj("merchantId" -> "mer_002", "amount" -> 185.00, "bin" -> "48471800"))
+
+      status(result) mustBe OK
+      val json = contentAsJson(result)
+      (json \ "cardType").as[String] mustBe "PREPAID"
+      (json \ "surchargeable").as[Boolean] mustBe false
+      (json \ "rate").as[Double] mustBe 0.0
+      (json \ "surcharge").as[Double] mustBe 0.0
+      (json \ "total").as[Double] mustBe 185.00
+    }
+
+    // docs/surcharging.md rule 2: if we can't tell the card type, don't surcharge
+    "not surcharge a card that isn't in the bin table" in {
+      val result = quote(Json.obj("merchantId" -> "mer_002", "amount" -> 185.00, "bin" -> "63900000"))
+
+      status(result) mustBe OK
+      val json = contentAsJson(result)
+      (json \ "cardType").as[String] mustBe "UNKNOWN"
+      (json \ "surchargeable").as[Boolean] mustBe false
+      (json \ "rate").as[Double] mustBe 0.0
+      (json \ "surcharge").as[Double] mustBe 0.0
+      (json \ "total").as[Double] mustBe 185.00
+    }
+
     "not surcharge when the merchant has surcharging off" in {
       val result = quote(Json.obj("merchantId" -> "mer_004", "amount" -> 40.00, "bin" -> "41111111"))
       status(result) mustBe OK
