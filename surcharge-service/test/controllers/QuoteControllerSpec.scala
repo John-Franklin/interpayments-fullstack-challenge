@@ -69,6 +69,22 @@ class QuoteControllerSpec extends PlaySpec
       (contentAsJson(result) \ "surcharge").as[Double] mustBe 0.0
     }
 
+    // docs/surcharging.md rule 3: whole yen for JPY. pay_01a04daf098074f1bd48244282b7a479 was surcharged ¥1,425.45
+    "round a JPY surcharge to the whole yen" in {
+      val result = quote(Json.obj("merchantId" -> "mer_003", "amount" -> 47515, "bin" -> "41111111"))
+
+      status(result) mustBe OK
+      val json = contentAsJson(result)
+      (json \ "currency").as[String] mustBe "JPY"
+      (json \ "surcharge").as[Double] mustBe 1425
+      (json \ "total").as[Double] mustBe 48940
+    }
+
+    "reject an amount finer than the currency allows" in {
+      status(quote(Json.obj("merchantId" -> "mer_003", "amount" -> 100.5, "bin" -> "41111111"))) mustBe UNPROCESSABLE_ENTITY
+      status(quote(Json.obj("merchantId" -> "mer_001", "amount" -> 10.005, "bin" -> "41111111"))) mustBe UNPROCESSABLE_ENTITY
+    }
+
     "return a 404 for an unknown merchant" in {
       val result = quote(Json.obj("merchantId" -> "mer_999", "amount" -> 10.00, "bin" -> "41111111"))
       status(result) mustBe NOT_FOUND
