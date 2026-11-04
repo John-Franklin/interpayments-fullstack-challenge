@@ -12,7 +12,9 @@ object SurchargeRules {
 
 object SurchargeCalculator {
 
+  // rounded half up to the cent (docs/surcharging.md rule 3). The arithmetic is done in decimal, not
+  // double, so a value like 4.625 is rounded as 4.625 rather than whatever binary approximation it lands on
   def surcharge(amount: Double, ratePercent: Double): Double = {
-    BigDecimal(amount * ratePercent / 100).setScale(2, RoundingMode.HALF_EVEN).toDouble
+    (BigDecimal(amount) * BigDecimal(ratePercent) / 100).setScale(2, RoundingMode.HALF_UP).toDouble
   }
 }
