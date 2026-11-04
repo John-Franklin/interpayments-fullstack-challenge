@@ -54,26 +54,22 @@ shared rather than keeping a second copy. Add JPY cases to the test above.
 The surcharge service doesn't round JPY surcharges to whole yen yet (rule 3), which is why these
 totals have decimals at all. That's a Scala fix, still open.
 
-### 3. During a surcharge-service outage, the terminal and the charge disagree
+### 3. If only one of the two quote calls fails, the terminal and the charge disagree
 
 **File:** `payments-api/src/InterPayments.Payments.Web.Api/Services/SurchargeClient.cs`, `GetQuote`
 
-**Bug:** if the quote fails, the payments API charges with no surcharge
-(`SurchargeQuote.NotSurcharged`). When the terminal can't get a quote, it now falls back to its own
-calculation at the merchant's rate. So during an outage a $185.00 Harbor Dental payment shows
-$189.63 on the terminal but is charged, and receipted, at $185.00. That's INC-4471 in reverse.
+**Current behaviour:** if the quote fails, the payments API charges with no surcharge
+(`SurchargeQuote.NotSurcharged`). That's right under rule 2 ("if the lookup fails, don't surcharge"),
+and the terminal now does the same: when it can't get a quote it shows the plain amount and says the
+payment will be taken without a surcharge. When the service is down for both, they agree.
 
-**Options:**
+**Bug:** the two calls fail independently. The terminal gives up after 2 s, but the payments API's
+`HttpClient` uses the 100 s default. If the service is slow, the terminal can show $185.00 while the
+payments API waits, gets a quote and charges $189.63. Or the reverse happens: the terminal shows
+$189.63 and the payments API's call fails, so it charges $185.00.
 
-- **A. Match the terminal:** on failure, apply `merchant.SurchargeRate` with the same half-up rounding.
-  The two would then agree, but debit and prepaid cards would really be surcharged during outages,
-  which breaks rules 1 and 2.
-- **B. Don't guess:** on failure, refuse the payment with a clear error instead of charging. This
-  never charges an amount the customer wasn't shown, but payments stop while the service is down.
-
-Either way, give the `HttpClient` an explicit timeout (it currently uses the 100 s default) that
-agrees with the terminal's 2 s quote timeout. Otherwise a slow service can time out at the terminal
-but still succeed at the payments API.
+**Change:** give the surcharge `HttpClient` an explicit timeout in `Program.cs` that matches the
+terminal's. That narrows the gap, but only 4 below closes it.
 
 ### 4. The preview and the charge come from two separate quotes
 
