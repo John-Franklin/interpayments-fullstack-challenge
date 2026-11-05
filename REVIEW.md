@@ -9,4 +9,5 @@ Another nit: digging into the ResponseCache object used here it never actually c
 Line 43:
 Swapping from one merchant to the other in the UI redirects back to the main page since it doesn't handle the route correctly. The new payment page has the same issue but now that we have multiple pages it's a more substantial issue. Some convenient change to the route handling to handle multiple pages is probably in order in the long term for this project as there will likely many more pages and functions as features are added.
 
-Overall, fix the comment in App.tsx and ReportsController.cs and change the typing in reports.controller.ts as that should be easy before merging. 
+## **Verdict**
+Overall, changes are needed before merging and some are pretty important. Fix the comment in App.tsx and ReportsController.cs and change the typing in reports.controller.ts as that should be easy before merging. 
