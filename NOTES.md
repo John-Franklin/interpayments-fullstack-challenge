@@ -8,6 +8,7 @@ to agree (docs/surcharging.md rule 4).
 
 ### 1. The gateway captures a cent less than the receipt (INC-4478)
 
+The primary cause for this specific error was Scala code in SurchargeCalculator.scala, which used the wrong rounding parameter. The fix makes it use the correct issue.
 **File:** `payments-api/src/InterPayments.Payments.Web.Api/Services/PaymentService.cs`, `CreatePayment`
 
 **Bug:** the quoted total is converted to minor units with `(long)(quote.Total * 100)`. `Total` is a
