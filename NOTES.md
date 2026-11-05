@@ -1,172 +1,40 @@
-# Notes
 
-## Payments API (.NET) changes needed but not made
+## Track Choice
+I've chosen the Scala track for this take home assignment.
 
-I took the Scala track, so these are described here rather than made (per INSTRUCTIONS.md). Each
-one is needed for what the customer is shown, what the receipt says and what the gateway captures
-to agree (docs/surcharging.md rule 4).
+## Part A
+INC-4471 is caused by SurchargeCalculator using the wrong parameter for rounding; it used RoundingMode.HALF_EVEN instead of RoundingMode.HALF_UP matching the spec in SURCHARGE.md. 
+As for the Audit bug In NewPaymentPage.tsx the code ran a function called previewSurcharge and it ran it regardless of whether the card was a credit card or not. To fix this I expanded out the handling on the page to check whether the card was a credit card or not on that page to solve that.
 
-### 1. The gateway captures a cent less than the receipt (INC-4478)
+INC-4478 is caused by a double precision issue in the C# code where a double was multiplied by 100 and then truncated but this handled rounding via integer precision instead of rounding half up as done elsewhere. This is therefore not included in the code as it's outside the scope of the Scala track I'm aiming for.
 
-The primary cause for this specific error was Scala code in SurchargeCalculator.scala, which used the wrong rounding parameter. The fix makes it use the correct issue.
-**File:** `payments-api/src/InterPayments.Payments.Web.Api/Services/PaymentService.cs`, `CreatePayment`
+## Part B
+Task 2: To handle this, I would run the load tester and then probably use Java profiling tools to find the source of the issue as we're on top of Java here and they're pretty powerful.  I'd give claude a round to fix it first though as it's pretty good at fixing performance issues these days.
 
-**Bug:** the quoted total is converted to minor units with `(long)(quote.Total * 100)`. `Total` is a
-double, so 79.99 is really 79.98999…, and the cast truncates it to 7998. The surcharge service used
-to add amount and surcharge as doubles too, so totals like `132.29999999999998` came through. It now
-adds them in decimal, but a clean double like 79.99 still truncates here. The receipt rounds for
-display; the gateway gets the truncated value.
+Task 3 (Chosen): Surcharge rules was chosen for this step as the preexisting tasks overlap the work on getteing everything up to standard so a lot of it has already been done. I added proper handling to yen and updated QuoteService.scala to use handle the precision of the total values which were summed with doubles, similar to the C# problem above. 
 
-**Evidence:** 26 of the 487 non-declined seed payments were captured exactly 1¢ below their
-receipt total: 18 for Blue Ridge (`mer_001`, the merchant in INC-4478), 3 for Harbor Dental and
-5 for Sakura. For example, `pay_01a05da670807be3ae22d4f9d1cd2f63` has a total of 132.30 and a
-capture of 13229. Across $0.01–$999.99 at 2.5% and 3%, about 20,000 possible totals are affected.
 
-**Change:**
+## Part C
+Task 4:
+I suspect I've encountered the cause of this issue during testing of other issues; It looks like the caching behavior in place doesn't take account for the current merchant at all when defining the cache key as the first time a page is loaded. This means if one merchant loaded the page it would load their data and if another merchant loaded the terminal in that period they would see data from the other merchant pulled from the cache. the solution would be to add the merchant id to the cache as a separate index to cache on so whenever a merchant loads the page they will load the cache specific to them. Before replying to the merchant I'd want to look at the logs and see what other vendors accessed the terminal page within the cache refresh window as their data potentially would have been leaked.
 
-```csharp
-AmountMinor: ToMinorUnits(quote.Total, merchant.Currency),
+Task 5 (Chosen):
+The reason why bff failed for this was because there was no error handling for async calls. Because this was happening in a Node environment anyone causing such a failure would kill the service. Errors need to be taken a lot more seriously in Node than local javascript because of this factor and you need handling. The way to discover this beforehand in production would be to add some test code throwing exceptions manually in the code in various places to test that you have full coverage and you've got full error handling in place.
 
-// decimal recovers the shortest representation (79.99), and rounding rather than truncating makes the
-// gateway charge exactly the total the customer was shown
-internal static long ToMinorUnits(double amount, string currency) =>
-    (long)Math.Round((decimal)amount * Factor(currency), MidpointRounding.AwayFromZero);
-```
+## PART D Task 7:
+ 
+1. Cache issue (P0)
+The issue in Task 4 lead to Customer data being visible to others. It also immediately breaks the UI if more than one person is using the tool at once. this particular bug would be exposed basically immediately as the UI is basically not functional with it and it exposes customer information to boot. It places slightly above the login flow task below because as the UI not being able to handle two people accessing the tool at the same time is a really big issue but both are absolutely required for MVP.
 
-**Test** (`PaymentServiceTests.cs`): with a stubbed quote, assert that the payment's
-`GatewayAmountMinor` and the simulated gateway's ledger entry both equal the expected minor units,
-for totals 79.99 → 7999, 640.4599999999999 → 64046, 132.29999999999998 → 13230 and 0.3 → 30.
+2. Customer Permissions and Login Flow (P0)
+Right now from the terminal view you can view and edit any customer's data. This is not acceptable for a production system so we'll need to add a login flow and restrict access when acting outside of proper permissions on the backend so that merchants can only access their own data.
 
-A longer-term fix is to carry money as `decimal` (or as integer minor units) end to end instead
-of `double`, starting with `SurchargeQuote`, `CreatePaymentRequest` and the `Payment` entity.
+3. Duplicate Charges (P1)
+The C# Track mentions a duplicate charges bug. It is quite substantial and must be dealt with. Yelp in particular is famous for an incident where people experience longer delays than usual and were charged for every time they clicked pay, espescially since when loading is slow it's quite tempting to click the button over and over. With a loading blip people could be charged dozens of times and we don't want that on our UI.
 
-### 2. JPY payments are sent to the gateway at 100× the amount
+4. Performance issue (P1)
+This is referring to the performance issue in Task 3. Performance issues are exactly what you run into as you're scaling so smoothing those out when going to production is important. You can always add more boxes in the short term but if it's already revealed to be an issue before going to production it's likely going to become much worse in the future.
 
-**File:** same line as above.
-
-**Bug:** the `* 100` assumes every currency has cents. The simulated gateway treats JPY as having
-no minor unit (`SimulatedGateway.CurrencyExponents`), so a ¥17,937 sale is sent as 1,793,745 and
-read as ¥1,793,745. The Sakura Imports (`mer_003`) seed payments show this pattern:
-`gatewayAmountMinor` is the total × 100 (17937.45 → 1793745).
-
-**Change:** use the currency's exponent (`Factor(currency)` above: 1 for JPY, 100 for USD), from the
-same table the gateway uses. That table is private to `SimulatedGateway` today, so move it somewhere
-shared rather than keeping a second copy. Add JPY cases to the test above.
-
-The decimals in those totals came from the surcharge service not rounding JPY surcharges to whole
-yen (rule 3). That's now fixed on the Scala side, but the `* 100` is still wrong for JPY.
-
-### 3. If only one of the two quote calls fails, the terminal and the charge disagree
-
-**File:** `payments-api/src/InterPayments.Payments.Web.Api/Services/SurchargeClient.cs`, `GetQuote`
-
-**Current behaviour:** if the quote fails, the payments API charges with no surcharge
-(`SurchargeQuote.NotSurcharged`). That's right under rule 2 ("if the lookup fails, don't surcharge"),
-and the terminal now does the same: when it can't get a quote it shows the plain amount and says the
-payment will be taken without a surcharge. When the service is down for both, they agree.
-
-**Bug:** the two calls fail independently. The BFF gives up after 1.5 s (the terminal after 2 s), but the payments API's
-`HttpClient` uses the 100 s default. If the service is slow, the terminal can show $185.00 while the
-payments API waits, gets a quote and charges $189.63. Or the reverse happens: the terminal shows
-$189.63 and the payments API's call fails, so it charges $185.00.
-
-**Change:** give the surcharge `HttpClient` an explicit timeout in `Program.cs` that matches the
-terminal's. That narrows the gap, but only 4 below closes it.
-
-### 4. The preview and the charge come from two separate quotes
-
-**Files:** `Contracts/Payments.cs` (`CreatePaymentRequest`), `Services/PaymentService.cs`
-
-**Bug:** the terminal shows the quote it got from the BFF, and the payments API gets its own new
-quote when it charges. If they differ (a rate change in between, or one of the two calls failing as
-in 3), the customer is charged an amount they weren't shown.
-
-**Change:** add the total the customer saw (e.g. `expectedTotal`) to `CreatePaymentRequest`. Compare it
-with the payments API's own quote before calling the gateway, and reject a mismatch (e.g. 409 with the
-new quote) so the terminal can show the new total and ask again. This is what actually enforces
-rule 4. Fixes 1–3 make the two numbers agree; this makes it impossible to charge if they don't.
-
-### 5. A quote the surcharge service rejects is charged anyway
-
-**File:** `Services/SurchargeClient.cs`, `GetQuote`
-
-**Bug:** any failed quote, including a 4xx, falls back to `NotSurcharged` and the payment goes ahead.
-The surcharge service now returns 422 for an amount finer than the currency allows (¥100.5, $10.005),
-so the payments API would charge that amount unsurcharged instead of rejecting it.
-
-**Change:** only fall back on a network error, timeout or 5xx. Pass a 4xx back to the caller as a
-400, before the gateway is called.
-
-### 6. Partial refunds (rule 5)
-
-Refunds are full only (`PaymentService.RefundPayment`). Proportional surcharge refunds, and the cap on
-the total surcharge refunded, need the .NET partial refunds work (Part B .NET Task 3). The seed data
-has 26 refunds, all for the full total, so there's nothing broken there yet.
-
-## Task 1: surcharging rules against the seed data
-
-I checked every seed payment (504) against each rule in `docs/surcharging.md`, using its stored card
-type and the merchant's rate. Each finding has seed payments both as examples and counterexamples,
-and they're used as test cases in `QuoteServiceSpec` and `SurchargeCalculatorSpec`.
-
-| Rule | Seed payments that break it | Cause | Status |
-| --- | --- | --- | --- |
-| 1 credit only | 40 prepaid surcharged (e.g. `pay_01a04a1a0b80710e9cc9e55ce22aa365`); debit 0 of 107 | `isSurchargeable` only excluded debit | Fixed (surcharge service) |
-| 2 if in doubt, don't | none in the seed data, but unknown BINs were surcharged | as above. Also, BINs under 8 digits were padded with zeros, which picks a card type for 40% of 6-digit prefixes | Fixed. A BIN under 8 digits, or a lookup that throws, counts as unknown |
-| 3 half up | 53 half-cent ties rounded half even (e.g. INC-4471's `pay_01a15f0586407084beccb042d5037e53`) | `RoundingMode.HALF_EVEN` | Fixed |
-| 3 whole yen | 26 JPY credit surcharges with fractional yen (e.g. ¥1,425.45 on `pay_01a04daf098074f1bd48244282b7a479`) | always rounded to 2 places | Fixed: scale from the currency (`java.util.Currency`). Amounts finer than the currency allows get a 422, and the terminal's amount field follows the currency |
-| 4 shown = charged | 58 totals with float noise (e.g. `640.4599999999999`); 21 captured 1¢ short; JPY sent ×100 | doubles in the surcharge service; truncation and `* 100` in the payments API | Total fixed in the surcharge service. The terminal shows only the service's quote. Payments API: items 1–5 above |
-| 5 refunds | none (no partial refunds exist) | — | Item 6 above |
-| 6 opt-out | none (Lakeside, 55 payments, never surcharged) | — | Works; tested with an opted-out merchant that has a rate configured |
-
-The BIN table itself is clean. There are no malformed rows, and no overlapping ranges of equal width
-with different card types, so "the narrowest matching range wins" always has a single answer. Every
-test card in the README resolves to the type listed for it.
-
-**Where the number should come from:** the surcharge service, once per payment. The terminal shows
-that service's quote and never works out its own: that's how the debit patient in INC-4471 was shown
-a surcharge. Item 4 above, the payments API checking the total the customer saw, is what makes it
-impossible to charge anything else.
-
-## INC-4493: every terminal goes down at once
-
-**Cause:** Express 4 doesn't catch a rejected promise from an `async` route handler. `quoteSurcharge`
-had no try/catch, so when `fetch` failed (the ticket's `ENOTFOUND surcharge-service` during a deploy,
-or the payments API being unreachable during the merchant lookup) the rejection went unhandled.
-Since Node 15 that ends the process, so one failed quote restarted the container and every terminal
-using it got errors. That's why it usually, but not always, lined up with surcharge-service deploys.
-Nothing had a timeout either, so a slow dependency held requests open indefinitely.
-
-**Fix (BFF only, no .NET changes needed):**
-
-- Every route goes through `asyncHandler`, so rejections reach the error handler.
-- Every outbound call goes through `upstreamFetch`. It has a timeout (1.5 s for the surcharge service,
-  which is under the terminal's 2 s; 15 s for the payments API, enough for a slow gateway charge). If
-  the dependency is unreachable, returns an error page instead of JSON, or times out, that one
-  request fails with a 502 or 504.
-- A timed-out charge or refund tells the clerk to check the payments list before retrying, because
-  it may have gone through.
-- The error handler copes with headers already being sent.
-- Process-level last resort: an unhandled rejection is logged as an ERROR instead of exiting. An
-  uncaught exception still exits, because the process state is unknown, but it lets in-flight
-  requests finish first.
-
-**Rule 4 when the surcharge service is slow or down:** the BFF answers 502 or 504 within 1.5 s. The
-terminal then shows the plain amount ("This payment will be taken without a surcharge"), which is
-what the payments API charges when its own quote fails (rule 2). Item 3 above covers the case where
-only one of them fails.
-
-**Tests:** `bff/src/resilience.test.ts` runs every route with the payments API unreachable, timing
-out and returning non-JSON, and the quote with the surcharge service in each of those states. Each
-time it checks that the BFF keeps serving. Before the fix these requests hung and never got a
-response.
-
-**Finding out before a merchant does:**
-
-- Alert on the BFF's 502/504 rate per upstream. The request log already has the status, and
-  `upstreamFetch` logs `<service> unreachable|timed out` with the error cause.
-- Alert on any `unhandledRejection` or `uncaughtException` log line, and on container restarts.
-- Alert on the share of quotes falling back to no surcharge; it's lost revenue for merchants.
-- Have deploys of the surcharge service drain connections, with readiness checks so it doesn't
-  receive traffic before it's up. A synthetic quote every minute catches the rest.
+5. Switch to a proper menu bar (P2)
+The current setup is fine, but as more features are added they are going to take up more header space and a bunch of buttons will look weird. Swapping in proper menu bar will solve this. This is prioritized over the dropdown selection redirect issue mentioned in REVIEW.md as in practice it's really dubious why users would want to switch between merchants at all in production as they will probably only be looking at their own data, so that issue is basically in practice just an extra convenience for developer use.
 
