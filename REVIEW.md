@@ -1,7 +1,3 @@
-Overall
-Typing is questionable.
-
-
 ## **ReportsController.cs**
 Line 1:
 The total for the gross is dramatically less than the card network totals so something isn't adding up. for Blue Ridge Outfitters 2026-10-20 we see a gross of 1609.57 but there's 40514.13 reported for mastercard alone. It also reports 8 payments when the actual total per the individual results is 10. I'm unfamiliar with C# so I can't isolate the exact issue but it should be here. Also, when no data to report on is found the UI defaults to Yen which is incorrect; it should probably use the per customer money. labelled This surfaces immediately in testing as there's no more recent data. this would almost certainly impact customer demos if test data isn't dated to the current date so that's probably a blocker. There's some ambiguity on what causes it as I'm seeing inconsistent behavior but I'll let you take a look.
