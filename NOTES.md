@@ -168,4 +168,7 @@ response.
 - Alert on the share of quotes falling back to no surcharge; it's lost revenue for merchants.
 - Have deploys of the surcharge service drain connections, with readiness checks so it doesn't
   receive traffic before it's up. A synthetic quote every minute catches the rest.
-
+**New Tasks to Work On**
+1. The buggy redirect to the main page when swapping the current merchant from the new payment page.
+2. swapping between merchants from the main page doesn't always change the UI; frequently the 
+3.

@@ -6,6 +6,7 @@ import { useMerchant } from './merchants/MerchantContext'
 import { NewPaymentPage } from './pages/NewPaymentPage'
 import { PaymentDetailPage } from './pages/PaymentDetailPage'
 import { PaymentsPage } from './pages/PaymentsPage'
+import { SettlementPage } from './pages/SettlementPage'
 
 const App = () => {
   const navigate = useNavigate()
@@ -21,6 +22,7 @@ const App = () => {
       <nav className='app-nav'>
         <Link to='/' className='brand'>Virtual Terminal</Link>
         <div className='app-nav-actions'>
+          <Button onClick={() => navigate('/reports/settlement')}>Settlement</Button>
           <Select
             aria-label='Merchant'
             value={devMerchant.id}
@@ -38,6 +40,7 @@ const App = () => {
         <Route path='/' element={<PaymentsPage />} />
         <Route path='/payments/new' element={<NewPaymentPage />} />
         <Route path='/payments/:id' element={<PaymentDetailPage />} />
+        <Route path='/reports/settlement' element={<SettlementPage />} />
       </Routes>
     </div>
   )
